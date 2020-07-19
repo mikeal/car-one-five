@@ -11,7 +11,6 @@ const _open = path => new Promise((resolve, reject) => {
 
 const run = async () => {
   const fd = await _open('./test.car')
-  console.log(fd)
   const _read = (pos, length) => {
     const b = Buffer.alloc(length)
     return new Promise((resolve, reject) => {

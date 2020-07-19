@@ -30,7 +30,7 @@ const all = async function * (car) {
 }
 
 const parse = async function * (car) {
-  const { Block, read } = car
+  const { Block, read, readLength } = car
 
   let setManifest
   let setHeader
@@ -49,52 +49,56 @@ const parse = async function * (car) {
   const decode = Block.multiformats.get('dag-cbor').decode
   const header = decode(chunk)
   setHeader(header)
-  console.log({header})
 
-  const readLength = car.readLength || Infinity
   const manifest = {}
 
-  let targetLength = 0
+  let targetLength = 42 // fits common sha2-256 cids + partSize
 
   while (len < readLength) {
     const start = len
-    chunk = await read(len, targetLength) // read 3 varints
+    let chunk = await read(start, targetLength) // read 3 varints
+    if (chunk.length === 0) break
     let l = 0
     const [partSize, l0] = varint.decode(chunk)
     l += l0
     let [cidVersion, l1] = varint.decode(chunk.subarray(l))
     l += l1
-    if (cidVersion < 5) {
+    if (cidVersion === 1) {
       // CID Codec
       const [, l2] = varint.decode(chunk.subarray(l))
       l += l2
       // Multihash - Hash ID
       const [, l3] = varint.decode(chunk.subarray(l))
       l += l3
-    } else {
+    } else if (cidVersion === 18) {
+      console.log({cidVersion})
       cidVersion = 0
+    } else {
+      throw new Error(`parser error ${cidVersion}:${partSize}:${l0}:${l1}:${chunk.length}`)
     }
-
     // Multihash - Hash Length
     const [hashLength, l4] = varint.decode(chunk.subarray(l))
     l += l4
     if ((hashLength + l) > targetLength) {
       targetLength = hashLength + l
-      chunk = await read(len, targetLength)
+      chunk = await read(start, targetLength)
     }
-    const dataStart = len + l + hashLength
-    const dataLength = partSize - (l + hashLength)
-    const cid = new Block.CID(chunk.subarray(l1, (l - l1) + hashLength))
+    const dataStart = start + l + hashLength
+    const dataLength = partSize - ((l - l0) + hashLength)
+    const cidBinary = chunk.subarray(l0, l + hashLength)
+    const cid = new Block.CID(cidBinary)
 
     const getBlock = async () => {
       const data = await read(dataStart, dataLength)
-      return Block.from(data, cid)
+      return Block.create(data, cid)
     }
 
     const entry = { cid, start, partSize, getBlock }
+    console.log(entry)
     manifest[cid.toString()] = entry
     yield entry
-    len += partSize
+
+    len += ( partSize + l0 )
   }
 
   car.parsing = false
@@ -105,10 +109,11 @@ const parse = async function * (car) {
 const noop = () => {}
 
 class CAR {
-  constructor (opts) {
-    const { store, read, Block, readLength } = opts
+  constructor ({ store, read, Block, readLength }) {
+    if (!Block || !read || !readLength) throw new Error('Missing required argument')
     this.Block = Block
     this.read = read
+    this.readLength = readLength
     this.store = store
     this.readLength = readLength
   }
