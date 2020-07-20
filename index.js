@@ -1,4 +1,17 @@
+import { promises as fs } from 'fs'
 import varints from 'varint'
+
+const load = async (Block, filename) => {
+  const fd = await fs.open(filename)
+  const stat = await fd.stat()
+  const read = async (pos, length) => {
+    const b = Buffer.alloc(length)
+    await fd.read(b, 0, length, pos)
+    return b
+  }
+
+  return new CAR({ Block, read, readLength: stat.size })
+}
 
 const cache = new Map()
 
@@ -145,4 +158,4 @@ class CAR {
   }
 }
 
-export { CAR /*, load, create */ }
+export { CAR, load /*, create */ }
