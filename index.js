@@ -9,8 +9,9 @@ const load = async (Block, filename) => {
     await fd.read(b, 0, length, pos)
     return b
   }
+  const onClose = () => fd.close()
 
-  return new CAR({ Block, read, readLength: stat.size })
+  return new CAR({ Block, read, readLength: stat.size, onClose })
 }
 
 const cache = new Map()
@@ -31,14 +32,10 @@ const varint = {
 const all = async function * (car) {
   if (car._parsing || car._parsed) {
     const manifest = await car.manifest
-    for (const value of manifest.values()) {
-      yield [value.cid, value.getBlock()]
-    }
+    yield * manifest.values()
   } else {
     const parser = await car._parse()
-    for await (const { cid, getBlock } of parser) {
-      yield [cid, getBlock()]
-    }
+    yield * parser
   }
 }
 
@@ -84,7 +81,6 @@ const parse = async function * (car) {
       const [, l3] = varint.decode(chunk.subarray(l))
       l += l3
     } else if (cidVersion === 18) {
-      console.log({cidVersion})
       cidVersion = 0
     } else {
       throw new Error(`parser error ${cidVersion}:${partSize}:${l0}:${l1}:${chunk.length}`)
@@ -107,7 +103,6 @@ const parse = async function * (car) {
     }
 
     const entry = { cid, start, partSize, getBlock }
-    console.log(entry)
     manifest[cid.toString()] = entry
     yield entry
 
@@ -122,13 +117,14 @@ const parse = async function * (car) {
 const noop = () => {}
 
 class CAR {
-  constructor ({ store, read, Block, readLength }) {
+  constructor ({ store, read, Block, readLength, onClose }) {
     if (!Block || !read || !readLength) throw new Error('Missing required argument')
     this.Block = Block
     this.read = read
     this.readLength = readLength
     this.store = store
     this.readLength = readLength
+    this.onClose = onClose
   }
 
   get isReader () {
@@ -155,6 +151,10 @@ class CAR {
 
   all () {
     return all(this)
+  }
+
+  close () {
+    return this.onClose()
   }
 }
 
